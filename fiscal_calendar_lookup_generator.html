@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="content="width=device-width, initial-scale=1.0">
+    <title>Custom 4-4-5 Fiscal Calendar Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar styling for better aesthetic */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .table-container { 
+            max-height: 70vh; /* Adjusted for input section */
+            overflow-y: auto; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        th, td { padding: 12px 16px; text-align: left; }
+        th { position: sticky; top: 0; background-color: #1e3a8a; color: white; z-index: 10; }
+        tr:nth-child(even) { background-color: #f1f5f9; }
+        .highlight-start { 
+            background-color: #fef3c7; /* Light yellow */
+            font-weight: 700;
+        }
+        .text-green-800 { color: #065f46; } /* Custom green for Month column */
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div class="max-w-5xl mx-auto">
+        <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Custom 4-4-5 Fiscal Calendar Generator</h1>
+        <p class="text-lg text-gray-600 mb-6">
+            **The Start Date below is treated as Day 1, Week 1, Month 1 of the fiscal year. ** You can select a 52-week or 53-week cycle.
+        </p>
+
+        <!-- Custom Date Input Section (Updated to 4 columns) -->
+        <div class="bg-white p-6 rounded-xl shadow-xl mb-6 border border-gray-100">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-end">
+                <div>
+                    <label for="start-date" class="block text-sm font-medium text-gray-700 mb-1">Start Date (Q1-M1-W1-D1)</label>
+                    <input type="date" id="start-date" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div>
+                    <label for="end-date" class="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                    <input type="date" id="end-date" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div>
+                    <label for="fy-length" class="block text-sm font-medium text-gray-700 mb-1">FY Weeks</label>
+                    <select id="fy-length" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                        <option value="52">52 Weeks (364 Days)</option>
+                        <option value="53">53 Weeks (371 Days)</option>
+                    </select>
+                </div>
+                <div>
+                    <button onclick="generateCalendar()" class="w-full bg-blue-600 text-white p-2.5 rounded-lg font-semibold hover:bg-blue-700 transition duration-150 shadow-md">
+                        Generate Calendar
+                    </button>
+                </div>
+            </div>
+            <p id="error-message" class="text-sm text-red-600 mt-2 hidden font-medium"></p>
+        </div>
+
+        <p class="text-md text-gray-700 mb-4">
+            Showing results from <span id="date-range-start" class="font-medium text-blue-800">...</span> to <span id="date-range-end" class="font-medium text-blue-800">...</span>
+        </p>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="flex items-center justify-center p-12 bg-white rounded-lg shadow-md">
+            <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-gray-700">Calculating data...</span>
+        </div>
+
+        <!-- Calendar Table Container -->
+        <div id="calendar-output" class="table-container rounded-lg hidden">
+            <table class="min-w-full divide-y divide-gray-300">
+                <thead>
+                    <tr>
+                        <th class="text-xs font-semibold uppercase tracking-wider rounded-tl-lg">Gregorian Date</th>
+                        <th class="text-xs font-semibold uppercase tracking-wider">Day of Week</th>
+                        <th class="text-xs font-semibold uppercase tracking-wider">Fiscal Month (Qx-Mx)</th>
+                        <th class="text-xs font-semibold uppercase tracking-wider rounded-tr-lg">Fiscal Week (FY[YY]-W[WW])</th>
+                    </tr>
+                </thead>
+                <tbody id="calendar-body" class="bg-white divide-y divide-gray-200">
+                    <!-- Rows will be inserted here by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // --- Helper Functions ---
+
+        // Helper to format date as MM/DD/YYYY
+        const formatDate = (date) => {
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            const yyyy = date.getFullYear();
+            return `${mm}/${dd}/${yyyy}`;
+        };
+
+        // Helper to get day name
+        const getDayName = (date) => {
+            return date.toLocaleDateString('en-US', { weekday: 'short' });
+        };
+
+        /**
+         * Calculates the Fiscal Week (FY[YY]-W[WW]) and Fiscal Year Index based on a custom FY Start Date,
+         * resetting the week count based on the provided cycle length (364 or 371 days).
+         * @param {Date} date - The current date being evaluated.
+         * @param {Date} fyStartDate - The user-defined start date (Q1-M1-W1-D1).
+         * @param {number} daysInCycle - Total days in the fiscal year (364 or 371).
+         * @returns {Object} Containing the full formatted week, the numerical week number (1-52/53), 
+         * and the display fiscal year.
+         */
+        const calculateFiscalWeek = (date, fyStartDate, daysInCycle) => {
+            const fyStartGregorianYear = fyStartDate.getFullYear();
+            
+            // Normalize dates to midnight for consistent calculation
+            const dateNormalized = new Date(date).setHours(0, 0, 0, 0);
+            const fyStartNormalized = new Date(fyStartDate).setHours(0, 0, 0, 0);
+
+            // Calculate the total difference in days from the custom start date (FYSD)
+            const dayLengthMs = 24 * 60 * 60 * 1000;
+            const diffDays = Math.round((dateNormalized - fyStartNormalized) / dayLengthMs);
+            
+            // Handle dates that fall before the custom start date
+            if (diffDays < 0) {
+                 return { full: "Before FY Start", weekNum: 0, displayFy: fyStartGregorianYear };
+            }
+
+            // 1. Determine the Fiscal Year Index (how many full cycles have passed)
+            const fyIndex = Math.floor(diffDays / daysInCycle);
+            const displayFy = fyStartGregorianYear + fyIndex;
+
+            // 2. Determine the Day Index within the current cycle (0 to daysInCycle - 1)
+            const dayInCycleIndex = diffDays % daysInCycle;
+
+            // 3. Calculate the week number (1-indexed, 1-52 or 1-53)
+            // Week 1 is days 0-6. Week 2 is days 7-13, etc.
+            const weekNumberInCycle = Math.floor(dayInCycleIndex / 7) + 1;
+            
+            // Format output: FY[YY]-W[WW]
+            const fyShort = String(displayFy).slice(2);
+            const weekPadded = String(weekNumberInCycle).padStart(2, '0');
+            
+            return { full: `FY${fyShort}-W${weekPadded}`, weekNum: weekNumberInCycle, displayFy: displayFy };
+        };
+
+        /**
+         * Calculates the Fiscal Month (Qx-Mx) based on the 4-4-5 cadence (4+4+5=13 weeks per quarter).
+         * @param {number} weekNumber - The 1-indexed fiscal week number (1 to 53).
+         * @returns {string} The formatted Fiscal Month (e.g., 'Q1-M1').
+         */
+        const calculateNrfMonth = (weekNumber) => {
+            // Special handling for the 53rd week (which extends the last month of Q4)
+            if (weekNumber === 53) {
+                // The 53rd week is always an extension of the 5-week month in Q4 (Q4-M3)
+                return "Q4-M3 (W53)"; 
+            }
+            
+            // Check if the week number is within the normal cycle range (1-52)
+            if (weekNumber < 1 || weekNumber > 52) {
+                return "N/A";
+            }
+            
+            // Define the week lengths for the 4-4-5 structure (4+4+5 = 13 weeks per quarter)
+            const weeksPerMonth = [4, 4, 5];
+            const weeksPerQuarter = 13;
+            
+            // Determine Quarter (1-4)
+            const quarter = Math.ceil(weekNumber / weeksPerQuarter);
+            
+            // Determine Week within Quarter (1-13)
+            const weekInQuarter = weekNumber - ((quarter - 1) * weeksPerQuarter);
+
+            // --- Determine Month (1-3) within the Quarter ---
+            let monthInQuarter;
+            if (weekInQuarter <= weeksPerMonth[0]) {
+                monthInQuarter = 1; // Weeks 1-4
+            } else if (weekInQuarter <= weeksPerMonth[0] + weeksPerMonth[1]) {
+                monthInQuarter = 2; // Weeks 5-8
+            } else {
+                monthInQuarter = 3; // Weeks 9-13
+            }
+
+            return `Q${quarter}-M${monthInQuarter}`;
+        };
+
+
+        /**
+         * Main function to generate the calendar data and render the table, triggered by the button.
+         */
+        window.generateCalendar = () => {
+            const calendarBody = document.getElementById('calendar-body');
+            const loadingIndicator = document.getElementById('loading');
+            const calendarOutput = document.getElementById('calendar-output');
+            const errorMessage = document.getElementById('error-message');
+
+            const startDateInput = document.getElementById('start-date').value;
+            const endDateInput = document.getElementById('end-date').value;
+            const fyLength = parseInt(document.getElementById('fy-length').value, 10); // NEW: Get FY length
+            
+            // Validation
+            if (!startDateInput || !endDateInput) {
+                errorMessage.textContent = 'Please select both a Start Date (Q1-M1-W1-D1) and an End Date.';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            // --- FIX: Robust Date Parsing to avoid timezone rollback issue ---
+            const startComponents = startDateInput.split('-').map(Number);
+            const endComponents = endDateInput.split('-').map(Number);
+
+            // Construct Date objects using local time components (Year, MonthIndex, Day)
+            let startDate = new Date(startComponents[0], startComponents[1] - 1, startComponents[2]); 
+            let endDate = new Date(endComponents[0], endComponents[1] - 1, endComponents[2]);
+            
+            // Ensure they are exactly at midnight local time
+            startDate.setHours(0, 0, 0, 0); 
+            endDate.setHours(0, 0, 0, 0);
+            
+            if (startDate > endDate) {
+                errorMessage.textContent = 'Start Date must be before the End Date.';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            // Calculate the total days in the fiscal cycle
+            const daysInFiscalCycle = fyLength * 7; // Either 364 or 371
+
+            // Clear previous results and show loading
+            calendarBody.innerHTML = '';
+            calendarOutput.classList.add('hidden');
+            loadingIndicator.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+
+            document.getElementById('date-range-start').textContent = formatDate(startDate);
+            document.getElementById('date-range-end').textContent = formatDate(endDate);
+            
+            // Use a DocumentFragment for faster DOM insertion
+            const fragment = document.createDocumentFragment();
+            let currentDate = new Date(startDate); 
+            
+            let previousWeek = null;
+
+            while (currentDate <= endDate) {
+                const dateString = formatDate(currentDate);
+                const dayName = getDayName(currentDate);
+                
+                // Calculate week and FY based on custom start date, respecting the cycle length
+                const nrfWeekData = calculateFiscalWeek(currentDate, startDate, daysInFiscalCycle); 
+                const nrfWeekResult = nrfWeekData.full;
+                const weekNumber = nrfWeekData.weekNum;
+                
+                // Calculate month based on resulting week number (1-53)
+                const nrfMonth = calculateNrfMonth(weekNumber);
+                
+                const row = document.createElement('tr');
+                let rowClasses = "hover:bg-blue-50 transition duration-150";
+
+                // Highlight the start of a new fiscal week (which occurs every 7 days from the start date)
+                const dayDifferenceFromStart = Math.round((currentDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+                
+                // Highlight if it's the first day of the fiscal week (day 1 of cycle, or day 1 + 7, + 14, etc.)
+                if (dayDifferenceFromStart >= 0 && dayDifferenceFromStart % 7 === 0) {
+                    rowClasses += " highlight-start border-t-2 border-yellow-500";
+                }
+                
+                row.className = rowClasses;
+
+                row.innerHTML = `
+                    <td class="whitespace-nowrap text-sm font-medium text-gray-900">${dateString}</td>
+                    <td class="whitespace-nowrap text-sm text-gray-600">${dayName}</td>
+                    <td class="whitespace-nowrap text-sm font-semibold text-green-800">${nrfMonth}</td>
+                    <td class="whitespace-nowrap text-sm font-semibold text-blue-800">${nrfWeekResult}</td>
+                `;
+                
+                fragment.appendChild(row);
+
+                // Store current week for comparison in the next iteration
+                previousWeek = nrfWeekResult;
+
+                // Move to the next day
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            // Append all rows at once and hide loading indicator
+            calendarBody.appendChild(fragment);
+            loadingIndicator.classList.add('hidden');
+            calendarOutput.classList.remove('hidden');
+        };
+
+        /**
+         * Sets the default dates and generates the initial calendar view on load.
+         */
+        const initializeDates = () => {
+            // Default start date set to the last Sunday of 2024 to make testing easy
+            document.getElementById('start-date').value = '2024-12-29'; 
+            
+            // Default end date: ~2 years from start to clearly show multiple cycle rollovers
+            const defaultEndDate = new Date('2026-12-29');
+            document.getElementById('end-date').value = defaultEndDate.toISOString().split('T')[0];
+            
+            // Set default FY length to 52 weeks
+            document.getElementById('fy-length').value = '52';
+
+            // Generate the initial calendar view
+            window.generateCalendar();
+        };
+
+        // Run the initialization logic when the script loads
+        document.addEventListener('DOMContentLoaded', initializeDates);
+
+    </script>
+</body>
+</html>
