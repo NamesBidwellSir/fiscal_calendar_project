@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Custom 4-4-5 Fiscal Calendar Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -30,15 +30,15 @@
 </head>
 <body class="p-4 sm:p-8">
 
-    <div class="max-w-5xl mx-auto">
+    <div class="max-w-6xl mx-auto">
         <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Custom 4-4-5 Fiscal Calendar Generator</h1>
         <p class="text-lg text-gray-600 mb-6">
-            **The Start Date below is treated as Day 1, Week 1, Month 1 of the fiscal year. ** You can select a 52-week or 53-week cycle.
+            The **Start Date** is Q1-M1-W1-D1. If this date is in December, the Fiscal Year defaults to the *next* Gregorian year, unless overridden below.
         </p>
 
-        <!-- Custom Date Input Section (Updated to 4 columns) -->
+        <!-- Custom Date Input Section (Updated to 5 columns for better layout) -->
         <div class="bg-white p-6 rounded-xl shadow-xl mb-6 border border-gray-100">
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-end">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
                 <div>
                     <label for="start-date" class="block text-sm font-medium text-gray-700 mb-1">Start Date (Q1-M1-W1-D1)</label>
                     <input type="date" id="start-date" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
@@ -55,6 +55,10 @@
                     </select>
                 </div>
                 <div>
+                    <label for="override-fy-year" class="block text-sm font-medium text-gray-700 mb-1">Override FY (e.g., 2024)</label>
+                    <input type="number" id="override-fy-year" placeholder="Optional" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div class="col-span-2 md:col-span-1">
                     <button onclick="generateCalendar()" class="w-full bg-blue-600 text-white p-2.5 rounded-lg font-semibold hover:bg-blue-700 transition duration-150 shadow-md">
                         Generate Calendar
                     </button>
@@ -112,16 +116,33 @@
 
         /**
          * Calculates the Fiscal Week (FY[YY]-W[WW]) and Fiscal Year Index based on a custom FY Start Date,
-         * resetting the week count based on the provided cycle length (364 or 371 days).
+         * respecting the cycle length and custom FY start year.
          * @param {Date} date - The current date being evaluated.
          * @param {Date} fyStartDate - The user-defined start date (Q1-M1-W1-D1).
          * @param {number} daysInCycle - Total days in the fiscal year (364 or 371).
+         * @param {string} fyOverride - Optional manual override for the starting fiscal year (e.g., '2025').
          * @returns {Object} Containing the full formatted week, the numerical week number (1-52/53), 
          * and the display fiscal year.
          */
-        const calculateFiscalWeek = (date, fyStartDate, daysInCycle) => {
-            const fyStartGregorianYear = fyStartDate.getFullYear();
+        const calculateFiscalWeek = (date, fyStartDate, daysInCycle, fyOverride) => {
             
+            let fyStartGregorianYear = fyStartDate.getFullYear();
+
+            // 1. Determine the Base Fiscal Year (the year assigned to W01)
+            let baseFyYear;
+            if (fyOverride && !isNaN(parseInt(fyOverride, 10)) && fyOverride.length === 4) {
+                // A) Use override if provided and valid (4-digit year)
+                baseFyYear = parseInt(fyOverride, 10);
+            } else {
+                // B) Apply December logic if no override
+                // December is month index 11 (0-indexed)
+                if (fyStartDate.getMonth() === 11) { 
+                    baseFyYear = fyStartGregorianYear + 1;
+                } else {
+                    baseFyYear = fyStartGregorianYear;
+                }
+            }
+
             // Normalize dates to midnight for consistent calculation
             const dateNormalized = new Date(date).setHours(0, 0, 0, 0);
             const fyStartNormalized = new Date(fyStartDate).setHours(0, 0, 0, 0);
@@ -132,17 +153,19 @@
             
             // Handle dates that fall before the custom start date
             if (diffDays < 0) {
-                 return { full: "Before FY Start", weekNum: 0, displayFy: fyStartGregorianYear };
+                 return { full: "Before FY Start", weekNum: 0, displayFy: baseFyYear };
             }
 
-            // 1. Determine the Fiscal Year Index (how many full cycles have passed)
+            // 2. Determine the Fiscal Year Index (how many full cycles have passed)
             const fyIndex = Math.floor(diffDays / daysInCycle);
-            const displayFy = fyStartGregorianYear + fyIndex;
+            
+            // The final displayed year is the base year + the number of cycles passed
+            const displayFy = baseFyYear + fyIndex;
 
-            // 2. Determine the Day Index within the current cycle (0 to daysInCycle - 1)
+            // 3. Determine the Day Index and Week Number
             const dayInCycleIndex = diffDays % daysInCycle;
 
-            // 3. Calculate the week number (1-indexed, 1-52 or 1-53)
+            // Calculate the week number (1-indexed, 1-52 or 1-53)
             // Week 1 is days 0-6. Week 2 is days 7-13, etc.
             const weekNumberInCycle = Math.floor(dayInCycleIndex / 7) + 1;
             
@@ -159,13 +182,12 @@
          * @returns {string} The formatted Fiscal Month (e.g., 'Q1-M1').
          */
         const calculateNrfMonth = (weekNumber) => {
-            // Special handling for the 53rd week (which extends the last month of Q4)
+            
+            // Handle the 53rd week, which is an extension of Q4-M3
             if (weekNumber === 53) {
-                // The 53rd week is always an extension of the 5-week month in Q4 (Q4-M3)
                 return "Q4-M3 (W53)"; 
             }
             
-            // Check if the week number is within the normal cycle range (1-52)
             if (weekNumber < 1 || weekNumber > 52) {
                 return "N/A";
             }
@@ -205,7 +227,8 @@
 
             const startDateInput = document.getElementById('start-date').value;
             const endDateInput = document.getElementById('end-date').value;
-            const fyLength = parseInt(document.getElementById('fy-length').value, 10); // NEW: Get FY length
+            const fyLength = parseInt(document.getElementById('fy-length').value, 10);
+            const fyOverride = document.getElementById('override-fy-year').value.trim(); // NEW: Override value
             
             // Validation
             if (!startDateInput || !endDateInput) {
@@ -231,9 +254,14 @@
                 errorMessage.classList.remove('hidden');
                 return;
             }
+            if (fyOverride.length > 0 && (isNaN(parseInt(fyOverride, 10)) || fyOverride.length !== 4)) {
+                errorMessage.textContent = 'Override Fiscal Year must be a 4-digit number (e.g., 2025).';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
 
             // Calculate the total days in the fiscal cycle
-            const daysInFiscalCycle = fyLength * 7; // Either 364 or 371
+            const daysInFiscalCycle = fyLength * 7; 
 
             // Clear previous results and show loading
             calendarBody.innerHTML = '';
@@ -254,8 +282,8 @@
                 const dateString = formatDate(currentDate);
                 const dayName = getDayName(currentDate);
                 
-                // Calculate week and FY based on custom start date, respecting the cycle length
-                const nrfWeekData = calculateFiscalWeek(currentDate, startDate, daysInFiscalCycle); 
+                // Calculate week and FY based on custom start date, respecting the cycle length and override
+                const nrfWeekData = calculateFiscalWeek(currentDate, startDate, daysInFiscalCycle, fyOverride); 
                 const nrfWeekResult = nrfWeekData.full;
                 const weekNumber = nrfWeekData.weekNum;
                 
@@ -301,7 +329,7 @@
          * Sets the default dates and generates the initial calendar view on load.
          */
         const initializeDates = () => {
-            // Default start date set to the last Sunday of 2024 to make testing easy
+            // Default start date set to the last Sunday of 2024 to test December logic
             document.getElementById('start-date').value = '2024-12-29'; 
             
             // Default end date: ~2 years from start to clearly show multiple cycle rollovers
